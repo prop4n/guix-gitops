@@ -54,6 +54,7 @@
              (branch "main")
              (system-file "system.scm")
              (interval 5)
+             (health (gitops-health-configuration (port 9902)))
              (dry-run? #t)))))
 
 (define (run-gitops-agent-test)
@@ -91,9 +92,27 @@
                 (and (wait-for-service 'gitops-agent) #t))
              marionette))
 
-          (test-assert "the repository is cached"
-            (wait-for-file "/var/cache/guix-gitops/checkout/system.scm"
-                           marionette))
+          ;; Each repository is cached under a directory derived from its URL,
+          ;; so that pointing the agent elsewhere cannot reuse a stale remote.
+          (test-assert "the repository is cached under its own directory"
+            (marionette-eval
+             '(begin
+                (use-modules (ice-9 ftw) (srfi srfi-1))
+                (let loop ((attempts 30))
+                  (define checkouts
+                    (or (scandir "/var/cache/guix-gitops"
+                                 (lambda (name)
+                                   (not (member name '("." "..")))))
+                        '()))
+                  (cond ((any (lambda (directory)
+                                (file-exists?
+                                 (string-append "/var/cache/guix-gitops/"
+                                                directory "/system.scm")))
+                              checkouts)
+                         #t)
+                        ((zero? attempts) #f)
+                        (else (sleep 1) (loop (- attempts 1))))))
+             marionette))
 
           (test-assert "the state file is written"
             (wait-for-file "/var/lib/guix-gitops/state.scm" marionette))
@@ -105,9 +124,49 @@
                       ((zero? attempts) #f)
                       (else (sleep 1) (loop (- attempts 1)))))))
 
+          (test-assert "the state records which repository it describes"
+            (string-prefix? "file://" (or (state-field 'url) "")))
+
           (test-equal "nothing was applied in dry-run mode"
             #f
             (state-field 'applied-commit))
+
+          ;; The reporting service must answer on its own, without the agent
+          ;; having to be healthy.
+          (test-assert "the health service is running"
+            (marionette-eval
+             '(begin
+                (use-modules (gnu services herd))
+                (and (wait-for-service 'gitops-health) #t))
+             marionette))
+
+          (test-assert "/health answers with the observed commit"
+            (marionette-eval
+             '(begin
+                (use-modules (web client) (ice-9 receive))
+                (let loop ((attempts 30))
+                  (define answer
+                    (false-if-exception
+                     (receive (response body)
+                         (http-get "http://127.0.0.1:9902/health"
+                                   #:decode-body? #t)
+                       body)))
+                  (cond ((and (string? answer)
+                              (string-contains answer "\"observed\":\"")
+                              (string-contains answer "\"uptime\":"))
+                         #t)
+                        ((zero? attempts) #f)
+                        (else (sleep 1) (loop (- attempts 1))))))
+             marionette))
+
+          (test-assert "/history is an array"
+            (marionette-eval
+             '(begin
+                (use-modules (web client) (ice-9 receive))
+                (receive (response body)
+                    (http-get "http://127.0.0.1:9902/history" #:decode-body? #t)
+                  (string-prefix? "[" body)))
+             marionette))
 
           (test-end))))
 
