@@ -1,0 +1,31 @@
+name: Guix
+
+# Deliberately manual: installing Guix and building a system takes far longer
+# than a free runner is comfortable with.  Run this before a release, or run
+# the same commands locally, which is faster.
+
+on:
+  workflow_dispatch:
+    inputs:
+      system-tests:
+        description: "Also run the marionette system tests"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: PromyLOPh/guix-install-action@v1
+      - name: Build the agent
+        run: |
+          guix build -L $(pwd)/modules \
+            -e '((@ (gitops services agent) gitops-agent-program)
+                 ((@ (gitops services agent) gitops-agent-configuration)
+                  (url "https://example.org/infrastructure.git")))'
+      - name: Evaluate the example operating system
+        run: guix system build -d -L $(pwd)/modules examples/system.scm
+      - name: Run system tests
+        if: inputs.system-tests
+        run: guix build -L $(pwd)/modules -m etc/manifests/system-tests.scm

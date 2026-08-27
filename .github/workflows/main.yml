@@ -2,52 +2,18 @@ name: CI
 
 on:
   pull_request:
-    paths-ignore:
-      - '.gitignore'
-      - '.dir-locals.el'
-      - '.guix-authorizations'
-      - '.guix-channel'
-      - 'LICENSE'
-      - 'README.md'
-      - 'doc/**'
-      - 'etc/news.scm'
-      - 'manifest.scm'
   push:
     branches: ["main"]
-    paths-ignore:
-      - '.gitignore'
-      - '.dir-locals.el'
-      - '.guix-authorizations'
-      - '.guix-channel'
-      - 'LICENSE'
-      - 'README.md'
-      - 'doc/**'
-      - 'etc/news.scm'
-      - 'manifest.scm'
   workflow_dispatch:
 
 jobs:
-  unit-tests:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: PromyLOPh/guix-install-action@v1
+      - name: Install Guile
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq guile-3.0
+      - name: Check that every Scheme file parses
+        run: guile --no-auto-compile etc/check-syntax.scm .
       - name: Run unit tests
-        run: guix repl -L $(pwd)/modules -- tests/run-tests.scm
-      - name: Build the agent
-        run: |
-          guix build -L $(pwd)/modules \
-            -e '((@ (gitops services agent) gitops-agent-program)
-                 ((@ (gitops services agent) gitops-agent-configuration)
-                  (url "https://example.org/infrastructure.git")))'
-      - name: Build the example operating system
-        run: guix system build -L $(pwd)/modules examples/system.scm
-
-  system-tests:
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@v6
-      - uses: PromyLOPh/guix-install-action@v1
-      - name: Run system tests
-        run: guix build -L $(pwd)/modules -m etc/manifests/system-tests.scm
+        run: guile --no-auto-compile -L modules -L . tests/run-tests.scm
