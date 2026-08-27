@@ -34,7 +34,15 @@
             gitops-agent-configuration-state-file
             gitops-agent-configuration-lock-file
             gitops-agent-configuration-runtime-config-file
+            gitops-agent-configuration-journal-file
+            gitops-agent-configuration-journal-length
+            gitops-agent-configuration-health
             gitops-agent-configuration-log-file
+
+            gitops-health-configuration
+            gitops-health-configuration?
+            gitops-health-configuration-host
+            gitops-health-configuration-port
             gitops-agent-configuration-max-attempts
             gitops-agent-configuration-max-backoff
             gitops-agent-configuration-allow-downgrades?
@@ -42,6 +50,7 @@
             gitops-agent-configuration-extra-load-path
 
             gitops-agent-program
+            gitops-health-program
             gitops-agent-shepherd-services
             gitops-agent-service-type))
 
@@ -51,7 +60,18 @@
   (commit gitops-introduction-commit)
   (signer gitops-introduction-signer))
 
+(define-configuration/no-serialization gitops-health-configuration
+  (host
+   (string "127.0.0.1")
+   "The address the health endpoint listens on.  It reports which repository
+and commit the machine follows, so it is bound to the loopback interface until
+you decide otherwise.")
+  (port
+   (positive-integer 9902)
+   "The port the health endpoint listens on."))
+
 (define-maybe/no-serialization gitops-introduction)
+(define-maybe/no-serialization gitops-health-configuration)
 (define-maybe/no-serialization string)
 
 (define-configuration/no-serialization gitops-agent-configuration
@@ -104,6 +124,22 @@ failed to apply.")
   (lock-file
    (string "/var/lib/guix-gitops/lock")
    "The file used to guarantee that a single agent runs at a time.")
+  (journal-file
+   (string "/var/lib/guix-gitops/journal.scm")
+   "The file recording which commits were applied, rejected or failed, and
+which system generation each produced.  Cross-referenced with @command{guix
+system list-generations}, it tells you what a machine has been running and
+what it can be rolled back to.")
+  (journal-length
+   (positive-integer 50)
+   "How many entries the journal keeps.  It is bounded on purpose: it lives on
+machines nobody watches.")
+  (health
+   (maybe-gitops-health-configuration)
+   "A @code{gitops-health-configuration} record.  When set, a second service
+serves @code{/health} and @code{/history} over HTTP.  It runs in a process of
+its own and reads the same files as the agent, so it still answers when the
+agent is wedged or gone -- which is when the answer matters most.")
   (log-file
    (string "/var/log/guix-gitops.log")
    "The file the agent logs to.")
@@ -154,8 +190,8 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
   (match-record config <gitops-agent-configuration>
                 (url branch system-file channels-file interval introduction
                  keyring-reference checkout-directory state-file lock-file
-                 runtime-config-file max-attempts max-backoff allow-downgrades?
-                 dry-run? extra-load-path)
+                 runtime-config-file journal-file journal-length max-attempts
+                 max-backoff allow-downgrades? dry-run? extra-load-path)
     (let* ((channels-file (and (maybe-value-set? channels-file) channels-file))
            (introduction (and (maybe-value-set? introduction) introduction))
            (runtime-config-file (and (maybe-value-set? runtime-config-file)
@@ -176,6 +212,8 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
                                #:state-file #$state-file
                                #:lock-file #$lock-file
                                #:runtime-config-file #$runtime-config-file
+                               #:journal-file #$journal-file
+                               #:journal-length #$journal-length
                                #:introduction-commit
                                #$(and introduction
                                       (gitops-introduction-commit introduction))
@@ -190,9 +228,26 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
                                #:extra-load-path '#$extra-load-path))))))
       (program-file "gitops-agent" entry-point #:guile (guix-guile)))))
 
+(define (gitops-health-program config)
+  (match-record config <gitops-agent-configuration>
+                (state-file journal-file health)
+    (let ((entry-point
+           (with-extensions (guix-extensions)
+             (with-imported-modules (source-module-closure
+                                     '((gitops build server))
+                                     #:select? gitops-module-name?)
+               #~(begin
+                   (use-modules (gitops build server))
+                   (run-health-server
+                    #:host #$(gitops-health-configuration-host health)
+                    #:port #$(gitops-health-configuration-port health)
+                    #:state-file #$state-file
+                    #:journal-file #$journal-file))))))
+      (program-file "gitops-health" entry-point #:guile (guix-guile)))))
+
 (define (gitops-agent-shepherd-services config)
-  (match-record config <gitops-agent-configuration> (log-file)
-    (list (shepherd-service
+  (match-record config <gitops-agent-configuration> (log-file health)
+    (cons (shepherd-service
            (documentation "Converge the system towards a Git repository.")
            (provision '(gitops-agent))
            (requirement '(user-processes networking guix-daemon))
@@ -206,17 +261,32 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
                            "GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt"
                            (string-append "PATH=" #$(file-append git "/bin")))))
            (stop #~(make-kill-destructor))
-           (respawn? #t)))))
+           (respawn? #t))
+          (if (maybe-value-set? health)
+              ;; Deliberately not required by 'gitops-agent': reporting must
+              ;; survive the thing it reports on.
+              (list (shepherd-service
+                     (documentation "Report what the guix-gitops agent is doing.")
+                     (provision '(gitops-health))
+                     (requirement '(user-processes networking))
+                     (start #~(make-forkexec-constructor
+                               (list #$(gitops-health-program config))
+                               #:log-file #$log-file))
+                     (stop #~(make-kill-destructor))
+                     (respawn? #t)))
+              '()))))
 
 (define (gitops-agent-activation config)
   (match-record config <gitops-agent-configuration>
-                (checkout-directory state-file lock-file runtime-config-file)
+                (checkout-directory state-file lock-file journal-file
+                 runtime-config-file)
     #~(for-each (lambda (directory)
                   (mkdir-p directory)
                   (chmod directory #o700))
                 (list #$checkout-directory
                       (dirname #$state-file)
                       (dirname #$lock-file)
+                      (dirname #$journal-file)
                       #$@(if (maybe-value-set? runtime-config-file)
                              (list #~(dirname #$runtime-config-file))
                              '())))))

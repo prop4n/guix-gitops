@@ -23,6 +23,6 @@
 
 (for-each (lambda (name)
             (resolve-module `(tests ,name)))
-          '(state decision reconfigure runtime))
+          '(state decision reconfigure runtime health))
 
 (exit (zero? %failures))

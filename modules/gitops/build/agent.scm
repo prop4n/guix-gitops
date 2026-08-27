@@ -4,9 +4,11 @@
 (define-module (gitops build agent)
   #:use-module (gitops build git)
   #:use-module (gitops build inferior)
+  #:use-module (gitops build journal)
   #:use-module (gitops build reconfigure)
   #:use-module (gitops build runtime)
   #:use-module (gitops build state)
+  #:use-module ((guix profiles) #:select (generation-number %system-profile))
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
   #:use-module (srfi srfi-11)
@@ -18,6 +20,15 @@
           (strftime "%Y-%m-%dT%H:%M:%S%z" (localtime (current-time)))
           (apply format #f format-string arguments))
   (force-output (current-output-port)))
+
+(define (current-system-generation)
+  "Return the number of the running system generation, or #f."
+  (catch #t
+    (lambda ()
+      (match (generation-number "/run/current-system" %system-profile)
+        (0 #f)
+        (number number)))
+    (const #f)))
 
 (define (call-with-lock file thunk)
   "Call THUNK while holding an exclusive lock on FILE.  Raise an exception
@@ -39,9 +50,25 @@ when the lock is already held by another process."
 (define* (run-agent #:key url branch system-file channels-file
                     (interval 900)
                     checkout-directory state-file lock-file runtime-config-file
+                    journal-file (journal-length %default-journal-length)
                     introduction-commit signer (keyring-reference "keyring")
                     (max-attempts 3) (max-backoff 3600)
                     allow-downgrades? dry-run? (extra-load-path '()))
+  (define (record-outcome url commit outcome)
+    (when journal-file
+      (catch #t
+        (lambda ()
+          (write-journal
+           (record-in-journal (read-journal journal-file)
+                              (journal-entry (current-time) url commit outcome
+                                             #:generation
+                                             (current-system-generation))
+                              #:max-entries journal-length)
+           journal-file))
+        (lambda (key . args)
+          (log-message "could not record ~a in ~a: ~a ~s"
+                       outcome journal-file key args)))))
+
   (define (runtime-configuration)
     (if runtime-config-file
         (read-runtime-configuration runtime-config-file
@@ -81,7 +108,7 @@ when the lock is already held by another process."
                                      expression)
           (reconfigure-locally expression))))
 
-  (define (apply-commit state checkout commit now reconfigure!)
+  (define (apply-commit state url checkout commit now reconfigure!)
     (log-message "applying ~a" commit)
     (if dry-run?
         (log-message "dry run: ~a not applied" commit)
@@ -89,12 +116,14 @@ when the lock is already held by another process."
           (if (zero? status)
               (begin
                 (log-message "applied ~a" commit)
-                (write-state (record-success state commit now) state-file))
+                (write-state (record-success state commit now) state-file)
+                (record-outcome url commit 'applied))
               (begin
                 (log-message "commit ~a failed with status ~a" commit status)
                 (write-state (record-failure state commit now interval
                                              max-backoff)
-                             state-file))))))
+                             state-file)
+                (record-outcome url commit 'failed))))))
 
   (define (run-cycle)
     (let* ((runtime (runtime-configuration))
@@ -140,13 +169,15 @@ waiting for a new commit"
                           commit (state-attempts state)))
             ('apply
              (if (authenticated? checkout commit commit-of-introduction signer)
-                 (apply-commit state checkout commit now
+                 (apply-commit state url checkout commit now
                                (lambda ()
                                  (reconfigure checkout system-file
                                               channels-file extra-load-path)))
-                 (write-state (record-failure state commit now interval
-                                              max-backoff)
-                              state-file))))))))
+                 (begin
+                   (write-state (record-failure state commit now interval
+                                                max-backoff)
+                                state-file)
+                   (record-outcome url commit 'rejected)))))))))
 
   (define (run-cycle/caught)
     (catch #t

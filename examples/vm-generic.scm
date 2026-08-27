@@ -59,6 +59,7 @@
                     (system-file "examples/vm-generic.scm")
                     (extra-load-path '("modules"))
                     (runtime-config-file "/etc/guix-gitops/runtime.scm")
+                    (health (gitops-health-configuration (port 9902)))
                     (interval 300)
                     (log-file "/dev/console")
                     (introduction

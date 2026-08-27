@@ -172,6 +172,61 @@ keys, values of the wrong type, and paths escaping the repository are dropped
 and logged. A missing or malformed file leaves the declared configuration in
 force rather than stopping the agent.
 
+## Asking a machine how it is doing
+
+Add a `health` record and the service serves two endpoints over HTTP:
+
+```scheme
+(gitops-agent-configuration
+ (url "https://github.com/you/infrastructure.git")
+ (health (gitops-health-configuration (port 9902))))
+```
+
+`GET /health` answers with what the machine follows and where it stands:
+
+```json
+{
+  "url": "https://github.com/you/infrastructure.git",
+  "applied": "0351867716141485e962449cb7bb34cd4e2ceca0",
+  "observed": "0351867716141485e962449cb7bb34cd4e2ceca0",
+  "up-to-date": true,
+  "failed": null,
+  "attempts": 0,
+  "booted-system": "/gnu/store/…-system",
+  "current-system": "/gnu/store/…-system",
+  "reboot-needed": false
+}
+```
+
+`reboot-needed` is not a guess: Guix keeps `/run/booted-system` and
+`/run/current-system`, and when they differ a reconfiguration has landed that
+is not fully in effect — because Guix never restarts a service whose
+definition changed. That is the field that tells you a machine is holding an
+update it has already downloaded.
+
+`GET /history` answers with what has been applied, newest first:
+
+```json
+[{"time": 1787827085,
+  "commit": "0351867716141485e962449cb7bb34cd4e2ceca0",
+  "outcome": "applied",
+  "generation": 42}]
+```
+
+`generation` is the system generation each commit produced, so
+`guix system list-generations` tells you what to roll back to. The journal is
+bounded — `journal-length`, 50 by default — because it lives on machines
+nobody watches.
+
+The endpoint runs in a process of its own and reads the same files as the
+agent, so it still answers when the agent is wedged or gone. It listens on
+localhost until you say otherwise: it reports your repository URL and commits,
+which is a map of your infrastructure for anyone who scans.
+
+There is deliberately no endpoint for the logs. When a machine is unwell,
+`/health` tells you *which one*, and its logs are one `ssh` away — whereas a
+repository URL carrying a token would be published on every request.
+
 ## What happens when a configuration is broken
 
 The agent never retries a broken commit in a loop:
@@ -274,6 +329,9 @@ one file per machine.
 | `state-file` | `"/var/lib/guix-gitops/state.scm"` | Persisted agent state |
 | `lock-file` | `"/var/lib/guix-gitops/lock"` | Mutual exclusion |
 | `runtime-config-file` | unset | File read every cycle, overriding the fields above |
+| `journal-file` | `"/var/lib/guix-gitops/journal.scm"` | What was applied, when, and as which generation |
+| `journal-length` | `50` | How many journal entries to keep |
+| `health` | unset | `gitops-health-configuration` enabling `/health` and `/history` |
 | `log-file` | `"/var/log/guix-gitops.log"` | Log destination |
 | `max-attempts` | `3` | Attempts on a failing commit before giving up |
 | `max-backoff` | `3600` | Cap on the retry delay, in seconds |
