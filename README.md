@@ -207,11 +207,27 @@ alist:
 
 ## Hacking
 
+The fast checks need nothing but Guile — the decision logic in
+`(gitops build state)` has no Guix dependency, which is what makes it easy to
+test:
+
 ```
-guix repl -L modules -- tests/run-tests.scm          # unit tests
-guix system build -L modules examples/system.scm     # the service composes
-guix build -L modules -m etc/manifests/system-tests.scm   # system tests
+guile etc/check-syntax.scm .                    # every file parses
+guile -L modules -L . tests/run-tests.scm       # unit tests
 ```
+
+The rest needs Guix, and is slow enough to be worth running deliberately:
+
+```
+guix build -L modules -e '((@ (gitops services agent) gitops-agent-program)
+                           ((@ (gitops services agent) gitops-agent-configuration)
+                            (url "https://example.org/infrastructure.git")))'
+guix system build -d -L modules examples/system.scm       # the service composes
+guix build -L modules -m etc/manifests/system-tests.scm   # marionette system tests
+```
+
+CI runs only the first pair on every push. The Guix jobs live in a separate
+workflow you trigger by hand.
 
 ## License
 
