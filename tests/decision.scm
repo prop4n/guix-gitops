@@ -24,6 +24,21 @@
   60
   (backoff-delay 1 60 3600))
 
+(test-equal "a transient failure is retried quickly at first"
+  '(5 10 20 40)
+  (map (lambda (failures) (retry-delay failures 900))
+       '(1 2 3 4)))
+
+(test-equal "retries never wait longer than one interval"
+  '(900 900)
+  (map (lambda (failures) (retry-delay failures 900))
+       '(20 100)))
+
+(test-equal "a short interval caps the retry delay too"
+  '(5 10 10)
+  (map (lambda (failures) (retry-delay failures 10))
+       '(1 2 3)))
+
 (test-equal "a fresh agent applies"
   'apply
   (next-action %empty-state %a 0 3))

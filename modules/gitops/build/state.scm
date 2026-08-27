@@ -18,7 +18,9 @@
             read-state
             write-state
 
+            %initial-retry-delay
             backoff-delay
+            retry-delay
             record-observation
             record-success
             record-failure
@@ -76,8 +78,17 @@ unreadable, malformed or written by an incompatible version."
     (rename-file temporary file)
     state))
 
+(define %initial-retry-delay 5)
+
 (define (backoff-delay attempts interval maximum)
   (min maximum (* interval (expt 2 (max 0 (- attempts 1))))))
+
+(define (retry-delay failures interval)
+  "Return how long to wait before retrying a cycle that failed outright, as
+opposed to one that reached a commit and failed to apply it.  Such failures are
+usually transient -- no network yet, no DNS yet -- so come back quickly at
+first, and no later than INTERVAL once it is clear the problem persists."
+  (backoff-delay failures %initial-retry-delay interval))
 
 (define (record-observation state commit now)
   (if (equal? commit (state-observed-commit state))

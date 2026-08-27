@@ -123,15 +123,27 @@ waiting for a new commit"
                                             max-backoff)
                             state-file)))))))
 
+  (define (run-cycle/caught)
+    (catch #t
+      (lambda () (run-cycle) #t)
+      (lambda (key . args)
+        (log-message "cycle failed: ~a ~s" key args)
+        #f)))
+
   (call-with-lock lock-file
     (lambda ()
       (log-message "watching ~a on branch ~a every ~a s" url branch interval)
       (when dry-run?
         (log-message "dry run: the system will never be reconfigured"))
-      (let loop ()
-        (catch #t
-          run-cycle
-          (lambda (key . args)
-            (log-message "cycle failed: ~a ~s" key args)))
-        (sleep interval)
-        (loop)))))
+      (let loop ((failures 0))
+        (if (run-cycle/caught)
+            (begin
+              (sleep interval)
+              (loop 0))
+            ;; The cycle itself failed, which usually means the network is not
+            ;; ready yet -- at boot, the agent may well start before DNS does.
+            ;; Come back quickly instead of idling for a whole interval.
+            (let ((delay (retry-delay (+ failures 1) interval)))
+              (log-message "retrying in ~a s" delay)
+              (sleep delay)
+              (loop (+ failures 1))))))))
