@@ -141,6 +141,23 @@ automatically.
 Two reconfigurations can never overlap: the agent holds an exclusive lock and
 runs each reconfiguration in a child process, one cycle at a time.
 
+## Updating the agent itself
+
+When a commit changes the agent's own configuration — or bumps the
+`guix-gitops` revision in `channels.scm` — the reconfiguration installs the new
+definition, but the *running* agent keeps executing its old code. This is not
+an oversight: `guix system reconfigure` never restarts a service whose
+definition changed, which is exactly what you want from a process that is in
+the middle of reconfiguring the system.
+
+The new agent takes over at the next reboot, or immediately if you run:
+
+```
+sudo herd restart gitops-agent
+```
+
+Until then the old agent keeps converging the machine, so nothing is stuck.
+
 ## Trying it safely
 
 Set `dry-run?` to `#t` for the first deployment. The agent fetches,

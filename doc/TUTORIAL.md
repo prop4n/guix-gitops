@@ -87,7 +87,9 @@ Point the agent at it:
 ```
 
 From now on, upgrading the machine means regenerating `channels.scm` and
-pushing. That includes upgrading guix-gitops itself.
+pushing. That includes upgrading guix-gitops itself — though the new agent
+only takes over after a reboot or a `herd restart gitops-agent`, since Guix
+never restarts a service whose definition just changed.
 
 ## 6. Sign your commits
 
