@@ -28,11 +28,18 @@ Add this to `~/.config/guix/channels.scm`:
 (cons (channel
        (name 'guix-gitops)
        (url "https://github.com/prop4n/guix-gitops.git")
-       (branch "main"))
+       (branch "main")
+       (introduction
+        (make-channel-introduction
+         "09fc5082f184bdecde93dfa742bedf5ff8c587ac"
+         (openpgp-fingerprint
+          "90C8 D92A 6D65 856C 0F84  EAE2 7E1F FB95 9BB3 3640"))))
       %default-channels)
 ```
 
-Then run `guix pull`.
+Then run `guix pull`. The introduction makes Guix verify that every commit
+since `09fc5082` is signed by an authorized key before running any of this
+code — worth keeping, given what this channel does.
 
 ## Using the service
 
