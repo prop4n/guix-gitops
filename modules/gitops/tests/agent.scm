@@ -140,33 +140,42 @@
                 (and (wait-for-service 'gitops-health) #t))
              marionette))
 
-          (test-assert "/health answers with the observed commit"
+          ;; Guile does not consider 'application/json' textual, so 'http-get'
+          ;; hands back a bytevector; the endpoint is right, the client needs
+          ;; telling.
+          (define (fetch path)
             (marionette-eval
-             '(begin
-                (use-modules (web client) (ice-9 receive))
+             `(begin
+                (use-modules (web client) (ice-9 receive)
+                             (rnrs bytevectors) (ice-9 iconv))
                 (let loop ((attempts 30))
                   (define answer
                     (false-if-exception
-                     (receive (response body)
-                         (http-get "http://127.0.0.1:9902/health"
-                                   #:decode-body? #t)
-                       body)))
-                  (cond ((and (string? answer)
-                              (string-contains answer "\"observed\":\"")
-                              (string-contains answer "\"uptime\":"))
-                         #t)
+                     (receive (response body) (http-get ,path)
+                       (if (bytevector? body)
+                           (bytevector->string body "UTF-8")
+                           body))))
+                  (cond ((string? answer) answer)
                         ((zero? attempts) #f)
                         (else (sleep 1) (loop (- attempts 1))))))
              marionette))
 
+          (test-assert "/health answers with the observed commit and uptime"
+            (let ((answer (fetch "http://127.0.0.1:9902/health")))
+              (and (string? answer)
+                   (string-contains answer "\"observed\":\"")
+                   (string-contains answer "\"uptime\":")
+                   #t)))
+
           (test-assert "/history is an array"
-            (marionette-eval
-             '(begin
-                (use-modules (web client) (ice-9 receive))
-                (receive (response body)
-                    (http-get "http://127.0.0.1:9902/history" #:decode-body? #t)
-                  (string-prefix? "[" body)))
-             marionette))
+            (let ((answer (fetch "http://127.0.0.1:9902/history")))
+              (and (string? answer) (string-prefix? "[" answer))))
+
+          (test-assert "an unknown path is refused"
+            (let ((answer (fetch "http://127.0.0.1:9902/logs")))
+              (and (string? answer)
+                   (string-contains answer "not found")
+                   #t)))
 
           (test-end))))
 
