@@ -103,25 +103,24 @@ when the lock is already held by another process."
                             (log-message "~a is at ~a (~a)" branch commit
                                          (or relation 'unknown))
                             (write-state observed state-file))))))
-        (cond ((not (authenticated? checkout commit))
+        (match (next-action state commit now max-attempts)
+          ('up-to-date
+           (log-message "already at ~a" commit))
+          ('backoff
+           (log-message "commit ~a failed ~a time(s); next attempt at ~a"
+                        commit (state-attempts state)
+                        (strftime "%Y-%m-%dT%H:%M:%S%z"
+                                  (localtime (state-next-attempt state)))))
+          ('abandoned
+           (log-message "commit ~a abandoned after ~a attempt(s); \
+waiting for a new commit"
+                        commit (state-attempts state)))
+          ('apply
+           (if (authenticated? checkout commit)
+               (apply-commit state checkout commit now)
                (write-state (record-failure state commit now interval
                                             max-backoff)
-                            state-file))
-              (else
-               (match (next-action state commit now max-attempts)
-                 ('up-to-date
-                  (log-message "already at ~a" commit))
-                 ('backoff
-                  (log-message "commit ~a failed ~a time(s); next attempt at ~a"
-                               commit (state-attempts state)
-                               (strftime "%Y-%m-%dT%H:%M:%S%z"
-                                         (localtime (state-next-attempt state)))))
-                 ('abandoned
-                  (log-message "commit ~a abandoned after ~a attempt(s); \
-waiting for a new commit"
-                               commit (state-attempts state)))
-                 ('apply
-                  (apply-commit state checkout commit now))))))))
+                            state-file)))))))
 
   (call-with-lock lock-file
     (lambda ()
