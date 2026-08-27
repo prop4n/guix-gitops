@@ -66,7 +66,6 @@
     (with-imported-modules '((gnu build marionette))
       #~(begin
           (use-modules (gnu build marionette)
-                       (ice-9 match)
                        (srfi srfi-64))
 
           (define marionette (make-marionette (list #$(virtual-machine os))))
@@ -89,9 +88,7 @@
             (marionette-eval
              '(begin
                 (use-modules (gnu services herd))
-                (match (start-service 'gitops-agent)
-                  (#f #f)
-                  (service (list (live-service-running service)))))
+                (and (wait-for-service 'gitops-agent) #t))
              marionette))
 
           (test-assert "the repository is cached"
