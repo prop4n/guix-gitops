@@ -8,7 +8,8 @@
   #:use-module (gitops build reconfigure)
   #:use-module (gitops build runtime)
   #:use-module (gitops build state)
-  #:use-module ((guix profiles) #:select (generation-number %system-profile))
+  #:use-module ((guix config) #:select (%state-directory))
+  #:use-module ((guix profiles) #:select (generation-number))
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
   #:use-module (srfi srfi-11)
@@ -22,10 +23,13 @@
   (force-output (current-output-port)))
 
 (define (current-system-generation)
-  "Return the number of the running system generation, or #f."
+  "Return the number of the current system generation, or #f.  Note that this
+reads the system profile rather than /run/current-system: the latter points
+into the store, where there is no generation number to be found."
   (catch #t
     (lambda ()
-      (match (generation-number "/run/current-system" %system-profile)
+      (match (generation-number
+              (string-append %state-directory "/profiles/system"))
         (0 #f)
         (number number)))
     (const #f)))
