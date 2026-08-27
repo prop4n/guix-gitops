@@ -15,7 +15,7 @@
 (use-service-modules base networking)
 
 (operating-system
-  (host-name "gitops-demo")
+  (host-name "gitops-converged")
   (timezone "Etc/UTC")
   (locale "en_US.utf8")
 
