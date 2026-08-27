@@ -7,6 +7,7 @@
   #:use-module (gitops build json)
   #:use-module (gitops build state)
   #:use-module (ice-9 match)
+  #:use-module (ice-9 rdelim)
   #:use-module (web request)
   #:use-module (web response)
   #:use-module (web server)
@@ -19,6 +20,16 @@
     (lambda () (readlink file))
     (const #f)))
 
+(define (read-first-line file)
+  (catch #t
+    (lambda ()
+      (call-with-input-file file
+        (lambda (port)
+          (match (read-line port)
+            ((? string? line) line)
+            (_ #f)))))
+    (const #f)))
+
 (define %json-headers
   '((content-type . (application/json (charset . "utf-8")))
     (cache-control . (no-store))))
@@ -29,7 +40,8 @@
 
 (define* (handle-request path #:key state-file journal-file
                          (booted-system "/run/booted-system")
-                         (current-system "/run/current-system"))
+                         (current-system "/run/current-system")
+                         (uptime-file "/proc/uptime"))
   "Answer a request for PATH.  Everything is read from disk on each request:
 the state file is written atomically, and reading it afresh is what lets this
 run in a process of its own."
@@ -39,6 +51,8 @@ run in a process of its own."
               (health-report (read-state state-file)
                              #:booted-system (read-link booted-system)
                              #:current-system (read-link current-system)
+                             #:uptime (parse-uptime
+                                       (read-first-line uptime-file))
                              #:now (current-time))))
     ("/history"
      (respond 200 (history-report (read-journal journal-file))))

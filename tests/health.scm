@@ -111,6 +111,49 @@
 (test-assert "a report serializes to JSON"
   (string-prefix? "{" (scm->json-string (report-of %empty-state))))
 
+;;; Uptime.
+
+(test-equal "uptime is the first field of /proc/uptime, rounded"
+  663
+  (parse-uptime "662.98 9623.43"))
+
+(test-equal "a whole number of seconds is fine too"
+  1000
+  (parse-uptime "1000 2000"))
+
+(test-equal "a machine up for no time at all"
+  0
+  (parse-uptime "0.00 0.00"))
+
+(test-equal "garbage is not an uptime"
+  #f
+  (parse-uptime "not a number"))
+
+(test-equal "an empty file is not an uptime"
+  #f
+  (parse-uptime ""))
+
+(test-equal "a missing file is not an uptime"
+  #f
+  (parse-uptime #f))
+
+(test-equal "a negative uptime is refused"
+  #f
+  (parse-uptime "-5.0 10.0"))
+
+(test-equal "the boot time is derived from the uptime"
+  1787831092
+  (assq-ref (health-report %empty-state #:now 1787831755 #:uptime 663)
+            'booted-at))
+
+(test-equal "without an uptime there is no boot time"
+  'null
+  (assq-ref (health-report %empty-state #:now 1787831755) 'booted-at))
+
+(test-equal "without a clock there is no boot time either"
+  'null
+  (assq-ref (health-report %empty-state #:uptime 663) 'booted-at))
+
 (test-end "health")
 
 (test-begin "journal")

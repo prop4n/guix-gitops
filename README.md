@@ -194,7 +194,9 @@ Add a `health` record and the service serves two endpoints over HTTP:
   "attempts": 0,
   "booted-system": "/gnu/store/…-system",
   "current-system": "/gnu/store/…-system",
-  "reboot-needed": false
+  "reboot-needed": false,
+  "uptime": 741,
+  "booted-at": 1787831093
 }
 ```
 
@@ -203,6 +205,11 @@ Add a `health` record and the service serves two endpoints over HTTP:
 is not fully in effect — because Guix never restarts a service whose
 definition changed. That is the field that tells you a machine is holding an
 update it has already downloaded.
+
+Read together with `uptime`, it tells you *how long* it has been holding it. A
+machine with `reboot-needed` true and a fortnight of uptime is one nobody has
+looked at. `booted-at` is `uptime` subtracted from the current time, so it can
+be off by a second; use `uptime` when you care about the duration.
 
 `GET /history` answers with what has been applied, newest first:
 

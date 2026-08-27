@@ -7,6 +7,7 @@
   #:use-module (gitops build state)
   #:use-module (ice-9 match)
   #:export (reboot-needed?
+            parse-uptime
             health-report
             history-report))
 
@@ -21,7 +22,18 @@ Both arguments are the targets of /run/booted-system and /run/current-system."
        (string? current-system)
        (not (string=? booted-system current-system))))
 
-(define* (health-report state #:key booted-system current-system (now #f))
+(define (parse-uptime contents)
+  "Return the number of whole seconds the machine has been up, read from the
+contents of /proc/uptime, or #f when it cannot be made sense of."
+  (and (string? contents)
+       (match (string-tokenize contents)
+         ((seconds . _)
+          (let ((seconds (string->number seconds)))
+            (and (real? seconds) (>= seconds 0) (inexact->exact (round seconds)))))
+         (_ #f))))
+
+(define* (health-report state #:key booted-system current-system (now #f)
+                        (uptime #f))
   "Return the health of the agent as an association list, ready to be
 serialized.  It is built from STATE alone, so it can be reported by a process
 other than the agent -- including when the agent is no longer running, which
@@ -42,6 +54,8 @@ is exactly when it is worth asking."
       (booted-system . ,(or-null booted-system))
       (current-system . ,(or-null current-system))
       (reboot-needed . ,(reboot-needed? booted-system current-system))
+      (uptime . ,(or-null uptime))
+      (booted-at . ,(or-null (and uptime now (- now uptime))))
       ,@(if now `((now . ,now)) '()))))
 
 (define (entry->report entry)
