@@ -3,6 +3,7 @@
 
 (define-module (gitops build agent)
   #:use-module (gitops build git)
+  #:use-module (gitops build inferior)
   #:use-module (gitops build reconfigure)
   #:use-module (gitops build state)
   #:use-module (ice-9 format)

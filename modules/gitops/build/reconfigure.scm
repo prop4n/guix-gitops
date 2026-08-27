@@ -2,39 +2,44 @@
 ;;; Copyright © 2026 prop4n <contact@legrandenzo.fr>
 
 (define-module (gitops build reconfigure)
-  #:use-module (guix channels)
-  #:use-module (guix inferior)
-  #:use-module (guix ui)
   #:use-module (ice-9 match)
   #:use-module (srfi srfi-1)
-  #:export (reconfigure-expression
-            reconfigure-locally
-            reconfigure-with-channels))
+  #:export (exit-status-expression
+            reconfigure-expression
+            reconfigure-locally))
+
+(define (exit-status-expression body)
+  "Wrap BODY, an s-expression, so that it evaluates to an exit status whether
+it returns normally or calls 'exit'.  The expression must not rely on anything
+beyond the core bindings, since it is evaluated in a fresh user module or in
+an inferior."
+  `(catch 'quit
+     (lambda () ,body 0)
+     (lambda (key . args)
+       (let ((value (if (pair? args) (car args) #t)))
+         (cond ((integer? value) value)
+               (value 0)
+               (else 1))))))
 
 (define* (reconfigure-expression system-file #:key (load-path '()) (options '()))
   "Return an s-expression that reconfigures the running system according to
-SYSTEM-FILE and evaluates to an exit status.  The expression only refers to
-'guix-system', the public entry point of (guix scripts system), so that it can
-be evaluated by any Guix revision."
+SYSTEM-FILE and evaluates to an exit status.  It only refers to 'guix-system',
+the public entry point of (guix scripts system), so that any Guix revision can
+evaluate it."
   `(begin
      (use-modules (guix scripts system))
-     (catch #t
-       (lambda ()
-         (catch 'quit
-           (lambda ()
-             (apply guix-system
-                    (list ,@(append-map (lambda (directory)
-                                          (list "-L" directory))
-                                        load-path)
-                          ,@options
-                          "reconfigure" ,system-file))
-             0)
-           (lambda (key . args)
-             (match args
-               ((status . _) (if (integer? status) status 0))
-               (_ 0)))))
-       (lambda (key . args)
-         1))))
+     ,(exit-status-expression
+       `(apply guix-system
+               (list ,@(append-map (lambda (directory)
+                                     (list "-L" directory))
+                                   load-path)
+                     ,@options
+                     "reconfigure" ,system-file)))))
+
+(define (report-exception key args)
+  (format (current-error-port) "guix-gitops: reconfiguration raised ~a ~s~%"
+          key args)
+  (force-output (current-error-port)))
 
 (define (reconfigure-locally expression)
   "Evaluate EXPRESSION in a child process using the Guix revision this agent
@@ -47,22 +52,11 @@ was built with.  Return its exit status."
              (match (eval expression (make-fresh-user-module))
                ((? integer? status) status)
                (_ 1)))
-           (lambda _ 1)))
+           (lambda (key . args)
+             (report-exception key args)
+             1)
+           (lambda (key . args)
+             (false-if-exception
+              (display-backtrace (make-stack #t) (current-error-port))))))
         (match (waitpid pid)
           ((_ . status) (or (status:exit-val status) 1))))))
-
-(define (read-channels file)
-  (load* file '((guix channels))))
-
-(define (reconfigure-with-channels channels-file expression)
-  "Evaluate EXPRESSION in an inferior pinned to the channels declared in
-CHANNELS-FILE.  Return its exit status."
-  (let ((inferior (inferior-for-channels (read-channels channels-file))))
-    (dynamic-wind
-      (const #t)
-      (lambda ()
-        (match (inferior-eval expression inferior)
-          ((? integer? status) status)
-          (_ 1)))
-      (lambda ()
-        (close-inferior inferior)))))
