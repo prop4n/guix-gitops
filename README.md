@@ -223,11 +223,41 @@ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -nographic \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0
 ```
 
+Store items are read only, so copy the image before booting it:
+
+```
+cp --sparse=always /gnu/store/…-image.qcow2 vm.qcow2 && chmod 644 vm.qcow2
+```
+
 The agent inside authenticates this repository, evaluates `examples/vm.scm`
 and reconfigures the machine to match it. Push a commit that changes the VM's
 `host-name` and watch it converge on the serial console. `extra-load-path`
 points at this repository's own `modules/`, which is what lets the VM's Guix
 resolve `(gitops services agent)` without pulling the channel.
+
+Note that Guix never restarts a service whose definition changed, so a new
+`host-name` — like a new agent — takes effect on the next boot.
+
+### Several machines from one image
+
+`examples/vm-generic.scm` is the same machine with a `runtime-config-file`. Build
+it once, then give each machine a thin copy that shares the original's blocks
+instead of duplicating them:
+
+```
+qemu-img create -f qcow2 -F qcow2 -b /gnu/store/…-image.qcow2 web01.qcow2
+```
+
+Boot it, write the file that says what this machine is, and let the agent do
+the rest:
+
+```
+mkdir -p /etc/guix-gitops
+echo '((system-file . "systems/web01.scm"))' > /etc/guix-gitops/runtime.scm
+```
+
+Repeat with `web02.qcow2`, `db01.qcow2`, and so on. One image, one signing key,
+one file per machine.
 
 ## Configuration reference
 
