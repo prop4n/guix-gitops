@@ -51,6 +51,12 @@
                     (branch "main")
                     (system-file "examples/vm.scm")
                     (extra-load-path '("modules"))
+                    ;; Bound to every interface only so that QEMU's port
+                    ;; forwarding can reach it from the host; 127.0.0.1, the
+                    ;; default, is what a real machine wants.
+                    (health (gitops-health-configuration
+                             (host "0.0.0.0")
+                             (port 9902)))
                     (interval 60)
                     (log-file "/dev/console")
                     (introduction
