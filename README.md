@@ -131,6 +131,47 @@ fingerprint of the key that signed it. The repository must also carry a
 use, implemented by the same code. Authentication runs *before* anything in
 the repository is evaluated. See `doc/TUTORIAL.md`.
 
+## One image, many machines
+
+Everything above is declared in the `operating-system`, which means one system
+image per repository. Set `runtime-config-file` to lift that:
+
+```scheme
+(gitops-agent-configuration
+ (url "https://github.com/you/fallback.git")      ;used when the file is absent
+ (runtime-config-file "/etc/guix-gitops/runtime.scm")
+ (introduction (gitops-introduction ...)))        ;stays in force, see below
+```
+
+The agent reads that file at the start of every cycle. It holds an association
+list, and may set `url`, `branch`, `system-file`, `channels-file` and
+`extra-load-path`:
+
+```scheme
+((url . "https://github.com/you/infrastructure.git")
+ (branch . "main")
+ (system-file . "systems/web01.scm"))
+```
+
+Write it by hand, or have anything write it — a provisioning script, a cloud
+metadata reader, a configuration management tool. The agent has one input, so
+it does not care which. Editing the file *is* the way to point a machine at
+another repository: the switch takes effect on the next cycle, with no restart.
+
+Switching repositories resets what the agent believes it has applied, and each
+repository gets its own Git cache, so commits from one are never confused with
+commits from another.
+
+**The trust anchor does not move.** When `introduction` is declared in the
+system, the runtime file cannot replace or remove it: a machine told to follow
+a different repository still refuses commits that are not signed by the key its
+owner chose. When no introduction is declared, the file may supply one.
+
+The file lives outside the store, so it is treated as untrusted input: unknown
+keys, values of the wrong type, and paths escaping the repository are dropped
+and logged. A missing or malformed file leaves the declared configuration in
+force rather than stopping the agent.
+
 ## What happens when a configuration is broken
 
 The agent never retries a broken commit in a loop:
@@ -202,6 +243,7 @@ resolve `(gitops services agent)` without pulling the channel.
 | `checkout-directory` | `"/var/cache/guix-gitops"` | Where the repository is cached |
 | `state-file` | `"/var/lib/guix-gitops/state.scm"` | Persisted agent state |
 | `lock-file` | `"/var/lib/guix-gitops/lock"` | Mutual exclusion |
+| `runtime-config-file` | unset | File read every cycle, overriding the fields above |
 | `log-file` | `"/var/log/guix-gitops.log"` | Log destination |
 | `max-attempts` | `3` | Attempts on a failing commit before giving up |
 | `max-backoff` | `3600` | Cap on the retry delay, in seconds |

@@ -149,6 +149,42 @@ authorized key.
 Give each machine its own file under `systems/`, and its own `system-file` in
 its agent configuration. One repository, one branch, many machines.
 
+## 8. Building one image for many machines
+
+Steps 1 to 7 bake the repository into the system, which means one image per
+repository. If you provision machines from a single image — a Proxmox
+template, a cloud image — declare a runtime configuration file instead:
+
+```scheme
+(service gitops-agent-service-type
+         (gitops-agent-configuration
+          (url "https://github.com/you/infrastructure.git")
+          (runtime-config-file "/etc/guix-gitops/runtime.scm")
+          (introduction
+           (gitops-introduction
+            (commit "<hash>")
+            (signer "AAAA BBBB ...")))))
+```
+
+Then, on each machine, write what makes it that machine:
+
+```scheme
+;; /etc/guix-gitops/runtime.scm
+((system-file . "systems/web01.scm"))
+```
+
+The agent picks it up on the next cycle. Nothing else changes: same image,
+same signing key, different file.
+
+Anything can write that file — your hands, a provisioning script, a reader for
+whatever metadata your host exposes at boot. Keep the `introduction` in the
+system declaration rather than in the file: the machine can then be pointed at
+any of *your* repositories, but never at someone else's.
+
+To move a machine to a different repository, edit the file. The next cycle
+follows the new one, and the agent forgets what it had applied from the old
+one. No restart, no reconfiguration.
+
 ## Recovering from a bad commit
 
 Push a fixed commit. The agent gives up on a failing commit after

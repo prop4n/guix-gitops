@@ -94,4 +94,37 @@
          (state (record-failure state %b 100 60 3600)))
     (state-applied-commit state)))
 
+;;; Switching repositories.
+
+(test-equal "a fresh state adopts the repository"
+  "https://example.org/a.git"
+  (state-url (state-for-repository %empty-state "https://example.org/a.git")))
+
+(test-assert "the same repository keeps the state"
+  (let ((state (record-success
+                (state-for-repository %empty-state "https://example.org/a.git")
+                %a 0)))
+    (eq? state (state-for-repository state "https://example.org/a.git"))))
+
+(test-equal "another repository forgets what was applied"
+  #f
+  (let ((state (record-success
+                (state-for-repository %empty-state "https://example.org/a.git")
+                %a 0)))
+    (state-applied-commit
+     (state-for-repository state "https://example.org/b.git"))))
+
+(test-equal "another repository forgets what failed"
+  '(#f 0)
+  (let* ((state (state-for-repository %empty-state "https://example.org/a.git"))
+         (state (record-failure state %a 0 60 3600))
+         (state (state-for-repository state "https://example.org/b.git")))
+    (list (state-failed-commit state) (state-attempts state))))
+
+(test-equal "a state written before repositories were tracked is not trusted"
+  #f
+  (state-applied-commit
+   (state-for-repository (record-success %empty-state %a 0)
+                         "https://example.org/a.git")))
+
 (test-end "state")

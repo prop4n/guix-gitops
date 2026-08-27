@@ -7,6 +7,9 @@
   #:export (%state-version
             %empty-state
 
+            state-url
+            state-for-repository
+
             state-applied-commit
             state-applied-time
             state-observed-commit
@@ -36,6 +39,7 @@
     ((_ . value) value)
     (_ default)))
 
+(define (state-url state) (field state 'url #f))
 (define (state-applied-commit state) (field state 'applied-commit #f))
 (define (state-applied-time state) (field state 'applied-time 0))
 (define (state-observed-commit state) (field state 'observed-commit #f))
@@ -89,6 +93,14 @@ opposed to one that reached a commit and failed to apply it.  Such failures are
 usually transient -- no network yet, no DNS yet -- so come back quickly at
 first, and no later than INTERVAL once it is clear the problem persists."
   (backoff-delay failures %initial-retry-delay interval))
+
+(define (state-for-repository state url)
+  "Return STATE if it describes URL, and a state describing URL afresh
+otherwise.  Commits recorded against one repository say nothing about another,
+so pointing the agent elsewhere must not leave it believing it is up to date."
+  (if (equal? url (state-url state))
+      state
+      (set-fields %empty-state `((url . ,url)))))
 
 (define (record-observation state commit now)
   (if (equal? commit (state-observed-commit state))

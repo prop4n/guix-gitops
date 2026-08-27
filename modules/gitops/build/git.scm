@@ -16,12 +16,15 @@
 
 (define* (fetch-configuration url #:key branch cache-directory starting-commit
                               (log-port (current-output-port)))
-  "Update the checkout of BRANCH of URL in CACHE-DIRECTORY.  Return three
+  "Update the checkout of BRANCH of URL under CACHE-DIRECTORY.  Return three
 values: the checkout directory, the commit it was reset to, and the relation
-of STARTING-COMMIT to that commit."
+of STARTING-COMMIT to that commit.  Each URL gets its own subdirectory, so
+that pointing the agent at another repository cannot make it fetch the old one
+through a stale remote."
   (update-cached-checkout url
                           #:ref `(branch . ,branch)
-                          #:cache-directory cache-directory
+                          #:cache-directory
+                          (url-cache-directory url cache-directory)
                           #:starting-commit starting-commit
                           #:log-port log-port))
 

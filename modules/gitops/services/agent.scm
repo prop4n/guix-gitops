@@ -33,6 +33,7 @@
             gitops-agent-configuration-checkout-directory
             gitops-agent-configuration-state-file
             gitops-agent-configuration-lock-file
+            gitops-agent-configuration-runtime-config-file
             gitops-agent-configuration-log-file
             gitops-agent-configuration-max-attempts
             gitops-agent-configuration-max-backoff
@@ -73,6 +74,15 @@ a list of channels.  When set, @code{system-file} is evaluated by an inferior
 pinned to those channels, so that both the package set and the agent itself
 are driven by Git.  When unset, the Guix revision this agent was built with is
 used instead.")
+  (runtime-config-file
+   (maybe-string)
+   "The name of a file, read at the start of every cycle, holding an
+association list that overrides @code{url}, @code{branch}, @code{system-file},
+@code{channels-file} and @code{extra-load-path}.  It lets one system image
+serve many machines: write the file by hand, or have something else write it
+at boot from whatever your host tells you.  A missing or malformed file leaves
+the fields declared here in force.  When @code{introduction} is set here, the
+file may not weaken it; when it is not, the file may supply one.")
   (interval
    (positive-integer 900)
    "The number of seconds between two checks of the repository.")
@@ -144,10 +154,12 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
   (match-record config <gitops-agent-configuration>
                 (url branch system-file channels-file interval introduction
                  keyring-reference checkout-directory state-file lock-file
-                 max-attempts max-backoff allow-downgrades? dry-run?
-                 extra-load-path)
+                 runtime-config-file max-attempts max-backoff allow-downgrades?
+                 dry-run? extra-load-path)
     (let* ((channels-file (and (maybe-value-set? channels-file) channels-file))
            (introduction (and (maybe-value-set? introduction) introduction))
+           (runtime-config-file (and (maybe-value-set? runtime-config-file)
+                                     runtime-config-file))
            (entry-point
             (with-extensions (guix-extensions)
               (with-imported-modules (source-module-closure
@@ -163,6 +175,7 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
                                #:checkout-directory #$checkout-directory
                                #:state-file #$state-file
                                #:lock-file #$lock-file
+                               #:runtime-config-file #$runtime-config-file
                                #:introduction-commit
                                #$(and introduction
                                       (gitops-introduction-commit introduction))
@@ -197,13 +210,16 @@ by GUIX, forcing it to interpret the whole of Guix at every start."
 
 (define (gitops-agent-activation config)
   (match-record config <gitops-agent-configuration>
-                (checkout-directory state-file lock-file)
+                (checkout-directory state-file lock-file runtime-config-file)
     #~(for-each (lambda (directory)
                   (mkdir-p directory)
                   (chmod directory #o700))
                 (list #$checkout-directory
                       (dirname #$state-file)
-                      (dirname #$lock-file)))))
+                      (dirname #$lock-file)
+                      #$@(if (maybe-value-set? runtime-config-file)
+                             (list #~(dirname #$runtime-config-file))
+                             '())))))
 
 (define gitops-agent-service-type
   (service-type

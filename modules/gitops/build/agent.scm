@@ -5,6 +5,7 @@
   #:use-module (gitops build git)
   #:use-module (gitops build inferior)
   #:use-module (gitops build reconfigure)
+  #:use-module (gitops build runtime)
   #:use-module (gitops build state)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
@@ -37,19 +38,26 @@ when the lock is already held by another process."
 
 (define* (run-agent #:key url branch system-file channels-file
                     (interval 900)
-                    checkout-directory state-file lock-file
+                    checkout-directory state-file lock-file runtime-config-file
                     introduction-commit signer (keyring-reference "keyring")
                     (max-attempts 3) (max-backoff 3600)
                     allow-downgrades? dry-run? (extra-load-path '()))
-  (define repository-directory
-    (in-vicinity checkout-directory "checkout"))
+  (define (runtime-configuration)
+    (if runtime-config-file
+        (read-runtime-configuration runtime-config-file
+                                    #:warn
+                                    (lambda (key value)
+                                      (log-message "ignoring ~s ~s from ~a"
+                                                   key value
+                                                   runtime-config-file)))
+        '()))
 
-  (define (authenticated? checkout commit)
-    (cond ((not introduction-commit) #t)
+  (define (authenticated? checkout commit commit-of-introduction signer)
+    (cond ((not commit-of-introduction) #t)
           (else
            (catch #t
              (lambda ()
-               (authenticate-checkout checkout introduction-commit signer
+               (authenticate-checkout checkout commit-of-introduction signer
                                       #:keyring-reference keyring-reference)
                (log-message "authenticated ~a" commit)
                #t)
@@ -57,7 +65,7 @@ when the lock is already held by another process."
                (log-message "authentication of ~a failed: ~a ~s" commit key args)
                #f)))))
 
-  (define (reconfigure checkout)
+  (define (reconfigure checkout system-file channels-file extra-load-path)
     (let ((expression
            (reconfigure-expression (in-vicinity checkout system-file)
                                    #:load-path
@@ -73,11 +81,11 @@ when the lock is already held by another process."
                                      expression)
           (reconfigure-locally expression))))
 
-  (define (apply-commit state checkout commit now)
+  (define (apply-commit state checkout commit now reconfigure!)
     (log-message "applying ~a" commit)
     (if dry-run?
         (log-message "dry run: ~a not applied" commit)
-        (let ((status (reconfigure checkout)))
+        (let ((status (reconfigure!)))
           (if (zero? status)
               (begin
                 (log-message "applied ~a" commit)
@@ -89,39 +97,56 @@ when the lock is already held by another process."
                              state-file))))))
 
   (define (run-cycle)
-    (let*-values (((state) (read-state state-file))
-                  ((checkout commit relation)
-                   (fetch-configuration url
-                                        #:branch branch
-                                        #:cache-directory repository-directory
-                                        #:starting-commit
-                                        (state-applied-commit state))))
-      (let* ((now (current-time))
-             (state (let ((observed (record-observation state commit now)))
-                      (if (eq? observed state)
-                          state
-                          (begin
-                            (log-message "~a is at ~a (~a)" branch commit
-                                         (or relation 'unknown))
-                            (write-state observed state-file))))))
-        (match (next-action state commit now max-attempts)
-          ('up-to-date
-           (log-message "already at ~a" commit))
-          ('backoff
-           (log-message "commit ~a failed ~a time(s); next attempt at ~a"
-                        commit (state-attempts state)
-                        (strftime "%Y-%m-%dT%H:%M:%S%z"
-                                  (localtime (state-next-attempt state)))))
-          ('abandoned
-           (log-message "commit ~a abandoned after ~a attempt(s); \
+    (let* ((runtime (runtime-configuration))
+           (url (runtime-ref runtime 'url url))
+           (branch (runtime-ref runtime 'branch branch))
+           (system-file (runtime-ref runtime 'system-file system-file))
+           (channels-file (runtime-ref runtime 'channels-file channels-file))
+           (extra-load-path
+            (runtime-ref runtime 'extra-load-path extra-load-path))
+           (state (let* ((recorded (read-state state-file))
+                         (state (state-for-repository recorded url)))
+                    (unless (eq? state recorded)
+                      (log-message "following ~a on branch ~a" url branch)
+                      (write-state state state-file))
+                    state)))
+      (let*-values (((commit-of-introduction signer)
+                     (effective-introduction runtime introduction-commit signer))
+                    ((checkout commit relation)
+                     (fetch-configuration url
+                                          #:branch branch
+                                          #:cache-directory checkout-directory
+                                          #:starting-commit
+                                          (state-applied-commit state))))
+        (let* ((now (current-time))
+               (state (let ((observed (record-observation state commit now)))
+                        (if (eq? observed state)
+                            state
+                            (begin
+                              (log-message "~a is at ~a (~a)" branch commit
+                                           (or relation 'unknown))
+                              (write-state observed state-file))))))
+          (match (next-action state commit now max-attempts)
+            ('up-to-date
+             (log-message "already at ~a" commit))
+            ('backoff
+             (log-message "commit ~a failed ~a time(s); next attempt at ~a"
+                          commit (state-attempts state)
+                          (strftime "%Y-%m-%dT%H:%M:%S%z"
+                                    (localtime (state-next-attempt state)))))
+            ('abandoned
+             (log-message "commit ~a abandoned after ~a attempt(s); \
 waiting for a new commit"
-                        commit (state-attempts state)))
-          ('apply
-           (if (authenticated? checkout commit)
-               (apply-commit state checkout commit now)
-               (write-state (record-failure state commit now interval
-                                            max-backoff)
-                            state-file)))))))
+                          commit (state-attempts state)))
+            ('apply
+             (if (authenticated? checkout commit commit-of-introduction signer)
+                 (apply-commit state checkout commit now
+                               (lambda ()
+                                 (reconfigure checkout system-file
+                                              channels-file extra-load-path)))
+                 (write-state (record-failure state commit now interval
+                                              max-backoff)
+                              state-file))))))))
 
   (define (run-cycle/caught)
     (catch #t
@@ -132,7 +157,9 @@ waiting for a new commit"
 
   (call-with-lock lock-file
     (lambda ()
-      (log-message "watching ~a on branch ~a every ~a s" url branch interval)
+      (log-message "checking every ~a s" interval)
+      (when runtime-config-file
+        (log-message "runtime configuration read from ~a" runtime-config-file))
       (when dry-run?
         (log-message "dry run: the system will never be reconfigured"))
       (let loop ((failures 0))
