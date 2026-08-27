@@ -1,0 +1,7 @@
+;; -*- mode: scheme; -*-
+
+(channel
+ (version 0)
+ (directory "modules")
+ (news-file "etc/news.scm")
+ (url "https://github.com/prop4n/guix-gitops.git"))
