@@ -171,6 +171,23 @@ Set `dry-run?` to `#t` for the first deployment. The agent fetches,
 authenticates and decides, logging what it *would* do, and never touches the
 system. Watch `/var/log/guix-gitops.log`, then turn it off.
 
+## Seeing it work in a VM
+
+`examples/vm.scm` is a bootable machine that follows *this* repository:
+
+```
+guix system image -t qcow2 --image-size=20G -L modules examples/vm.scm
+qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -nographic \
+  -drive file=vm.qcow2,if=virtio,format=qcow2 \
+  -netdev user,id=net0 -device virtio-net-pci,netdev=net0
+```
+
+The agent inside authenticates this repository, evaluates `examples/vm.scm`
+and reconfigures the machine to match it. Push a commit that changes the VM's
+`host-name` and watch it converge on the serial console. `extra-load-path`
+points at this repository's own `modules/`, which is what lets the VM's Guix
+resolve `(gitops services agent)` without pulling the channel.
+
 ## Configuration reference
 
 | Field | Default | Meaning |
