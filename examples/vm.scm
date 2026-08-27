@@ -13,11 +13,14 @@
              (gnu system image)
              (gitops services agent))
 (use-service-modules base networking)
+(use-package-modules python)
 
 (operating-system
   (host-name "gitops-converged")
   (timezone "Etc/UTC")
   (locale "en_US.utf8")
+
+  (packages (cons python-3.11 %base-packages))
 
   (bootloader
    (bootloader-configuration
