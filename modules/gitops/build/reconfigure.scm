@@ -25,16 +25,22 @@ an inferior."
   "Return an s-expression that reconfigures the running system according to
 SYSTEM-FILE and evaluates to an exit status.  It only refers to 'guix-system',
 the public entry point of (guix scripts system), so that any Guix revision can
-evaluate it."
+evaluate it.
+
+Everything 'guix-system' would print is sent to the error port.  This is not
+cosmetic: when the expression runs in an inferior, standard output carries the
+REPL protocol, and a single line of build progress written there corrupts it
+and takes the inferior down."
   `(begin
      (use-modules (guix scripts system))
      ,(exit-status-expression
-       `(apply guix-system
-               (list ,@(append-map (lambda (directory)
-                                     (list "-L" directory))
-                                   load-path)
-                     ,@options
-                     "reconfigure" ,system-file)))))
+       `(parameterize ((current-output-port (current-error-port)))
+          (apply guix-system
+                 (list ,@(append-map (lambda (directory)
+                                       (list "-L" directory))
+                                     load-path)
+                       ,@options
+                       "reconfigure" ,system-file))))))
 
 (define (report-exception key args)
   (format (current-error-port) "guix-gitops: reconfiguration raised ~a ~s~%"
