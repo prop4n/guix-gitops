@@ -8,7 +8,8 @@
             %empty-state
 
             state-url
-            state-for-repository
+            state-system-file
+            state-for-target
 
             state-applied-commit
             state-applied-time
@@ -40,6 +41,7 @@
     (_ default)))
 
 (define (state-url state) (field state 'url #f))
+(define (state-system-file state) (field state 'system-file #f))
 (define (state-applied-commit state) (field state 'applied-commit #f))
 (define (state-applied-time state) (field state 'applied-time 0))
 (define (state-observed-commit state) (field state 'observed-commit #f))
@@ -94,13 +96,20 @@ usually transient -- no network yet, no DNS yet -- so come back quickly at
 first, and no later than INTERVAL once it is clear the problem persists."
   (backoff-delay failures %initial-retry-delay interval))
 
-(define (state-for-repository state url)
-  "Return STATE if it describes URL, and a state describing URL afresh
-otherwise.  Commits recorded against one repository say nothing about another,
-so pointing the agent elsewhere must not leave it believing it is up to date."
-  (if (equal? url (state-url state))
+(define (state-for-target state url system-file)
+  "Return STATE if it describes URL and SYSTEM-FILE, and a state describing
+them afresh otherwise.
+
+What a machine has applied is only meaningful against the repository and the
+file it was applied from.  Told to follow another repository, or to become a
+different machine within the same one, the agent must not go on believing it
+is up to date -- the commit may well be unchanged while what it should build
+from it is not."
+  (if (and (equal? url (state-url state))
+           (equal? system-file (state-system-file state)))
       state
-      (set-fields %empty-state `((url . ,url)))))
+      (set-fields %empty-state `((url . ,url)
+                                 (system-file . ,system-file)))))
 
 (define (record-observation state commit now)
   (if (equal? commit (state-observed-commit state))

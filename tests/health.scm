@@ -106,7 +106,7 @@
 
 (test-equal "the repository is reported"
   %url
-  (field (report-of (state-for-repository %empty-state %url)) 'url))
+  (field (report-of (state-for-target %empty-state %url "systems/web01.scm")) 'url))
 
 (test-assert "a report serializes to JSON"
   (string-prefix? "{" (scm->json-string (report-of %empty-state))))

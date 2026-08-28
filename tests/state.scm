@@ -94,37 +94,54 @@
          (state (record-failure state %b 100 60 3600)))
     (state-applied-commit state)))
 
-;;; Switching repositories.
+;;; Switching repositories, and switching machines within one.
 
-(test-equal "a fresh state adopts the repository"
-  "https://example.org/a.git"
-  (state-url (state-for-repository %empty-state "https://example.org/a.git")))
+(define %a-repo "https://example.org/a.git")
+(define %b-repo "https://example.org/b.git")
 
-(test-assert "the same repository keeps the state"
-  (let ((state (record-success
-                (state-for-repository %empty-state "https://example.org/a.git")
-                %a 0)))
-    (eq? state (state-for-repository state "https://example.org/a.git"))))
+(define (applied-state url system-file commit)
+  (record-success (state-for-target %empty-state url system-file) commit 0))
+
+(test-equal "a fresh state adopts the repository and the file"
+  (list %a-repo "systems/web01.scm")
+  (let ((state (state-for-target %empty-state %a-repo "systems/web01.scm")))
+    (list (state-url state) (state-system-file state))))
+
+(test-assert "the same target keeps the state"
+  (let ((state (applied-state %a-repo "systems/web01.scm" %a)))
+    (eq? state (state-for-target state %a-repo "systems/web01.scm"))))
 
 (test-equal "another repository forgets what was applied"
   #f
-  (let ((state (record-success
-                (state-for-repository %empty-state "https://example.org/a.git")
-                %a 0)))
+  (let ((state (applied-state %a-repo "systems/web01.scm" %a)))
     (state-applied-commit
-     (state-for-repository state "https://example.org/b.git"))))
+     (state-for-target state %b-repo "systems/web01.scm"))))
+
+;; Being told to become another machine must not look like being up to date,
+;; even though the commit has not moved.
+(test-equal "another system file forgets what was applied"
+  #f
+  (let ((state (applied-state %a-repo "systems/web01.scm" %a)))
+    (state-applied-commit
+     (state-for-target state %a-repo "systems/web02.scm"))))
+
+(test-equal "a new system file at the same commit is applied, not skipped"
+  'apply
+  (let* ((state (applied-state %a-repo "systems/web01.scm" %a))
+         (state (state-for-target state %a-repo "systems/web02.scm")))
+    (next-action state %a 100 3)))
 
 (test-equal "another repository forgets what failed"
   '(#f 0)
-  (let* ((state (state-for-repository %empty-state "https://example.org/a.git"))
+  (let* ((state (state-for-target %empty-state %a-repo "systems/web01.scm"))
          (state (record-failure state %a 0 60 3600))
-         (state (state-for-repository state "https://example.org/b.git")))
+         (state (state-for-target state %b-repo "systems/web01.scm")))
     (list (state-failed-commit state) (state-attempts state))))
 
-(test-equal "a state written before repositories were tracked is not trusted"
+(test-equal "a state written before targets were tracked is not trusted"
   #f
   (state-applied-commit
-   (state-for-repository (record-success %empty-state %a 0)
-                         "https://example.org/a.git")))
+   (state-for-target (record-success %empty-state %a 0)
+                     %a-repo "systems/web01.scm")))
 
 (test-end "state")

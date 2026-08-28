@@ -138,9 +138,10 @@ when the lock is already held by another process."
            (extra-load-path
             (runtime-ref runtime 'extra-load-path extra-load-path))
            (state (let* ((recorded (read-state state-file))
-                         (state (state-for-repository recorded url)))
+                         (state (state-for-target recorded url system-file)))
                     (unless (eq? state recorded)
-                      (log-message "following ~a on branch ~a" url branch)
+                      (log-message "following ~a in ~a on branch ~a"
+                                   system-file url branch)
                       (write-state state state-file))
                     state)))
       (let*-values (((commit-of-introduction signer)
