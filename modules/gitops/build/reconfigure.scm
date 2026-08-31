@@ -47,22 +47,32 @@ and takes the inferior down."
           key args)
   (force-output (current-error-port)))
 
+(define %void-port (%make-void-port "w"))
+
 (define (reconfigure-locally expression)
   "Evaluate EXPRESSION in a child process using the Guix revision this agent
-was built with.  Return its exit status."
+was built with.  Return its exit status.
+
+The child runs with standard output and error redirected to a void port:
+when the agent logs to a serial console, which is common for unattended
+virtual machines, the kernel driver blocks a writer once its buffer is full
+and nothing is reading.  Reconfiguration prints a lot, fast, and would wedge
+itself on the console and never come back."
   (let ((pid (primitive-fork)))
     (if (zero? pid)
         (primitive-_exit
-         (catch #t
-           (lambda ()
-             (match (eval expression (make-fresh-user-module))
-               ((? integer? status) status)
-               (_ 1)))
-           (lambda (key . args)
-             (report-exception key args)
-             1)
-           (lambda (key . args)
-             (false-if-exception
-              (display-backtrace (make-stack #t) (current-error-port))))))
+         (parameterize ((current-output-port %void-port)
+                        (current-error-port %void-port))
+           (catch #t
+             (lambda ()
+               (match (eval expression (make-fresh-user-module))
+                 ((? integer? status) status)
+                 (_ 1)))
+             (lambda (key . args)
+               (report-exception key args)
+               1)
+             (lambda (key . args)
+               (false-if-exception
+                (display-backtrace (make-stack #t) (current-error-port)))))))
         (match (waitpid pid)
           ((_ . status) (or (status:exit-val status) 1))))))
